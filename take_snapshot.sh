@@ -18,90 +18,90 @@
 #For single table Snapshot
 # bash take_snapshot.sh table
 #For all tableSnapshot
-#bash take_snapshot.sh *
+#bash take_snapshot.sh all
 
 #For multi table snapshot
 #bash take_snapshot.sh multi /file/tables/list/tables.txt
 #table.txt contain list of tables. One table name per row
 
-export TS=`date "+%s"`
-export WORKING_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export TS=$(date "+%s")
+export WORKING_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export LOGS=$WORKING_DIR/logs
 export currentDate=$(date '+%Y-%m-%d-%H-%M-%S')
 export UTILS=$WORKING_DIR/utils
-
+export HBASE_SHELL_OPTS="-Xms2048m -Xmx2048m"
 mkdir -p $LOGS
 
-function  make_table_snapshot() {
+function make_table_snapshot() {
 	tableName=$1
-	
-	echo "$date Create snapshot for table $tableName: $tableName-$date" >> $LOGS/makesnapshot.log
-	
+	echo "$currentDate Create snapshot for table $tableName: $tableName-$currentDate" >>$LOGS/makesnapshot.log
 	#make snapshot for table
-	echo "snapshot '$tableName', '$tableName-$TS'" | hbase shell -n 2>> $LOGS/makesnapshot.log
-	
+	echo "snapshot '$tableName', '$tableName-$TS'" | hbase shell -n 2>>$LOGS/makesnapshot.log
 	status=$?
-	
-	if [ $status -ne 0 ];
-	then
-		echo "$date Snapshot for table $tableName may have failed: $status" >> $LOGS/makesnapshot.log
+	if [ $status -ne 0 ]; then
+		echo "$currentDate Snapshot for table $tableName may have failed: $status" >>$LOGS/makesnapshot.log
 		#if the snapshot of a table fails, quit the program
 		exit $status
 	fi
 }
 
-function  make_all_table_snapshot() {
+function make_all_table_snapshot() {
 	tables=$1
-	echo "$date Start making snapshot for all tables" >> $LOGS/makesnapshot.log
-	while IFS= read -r line
-	do
+	echo "$currentDate Start making snapshot for all tables" >>$LOGS/makesnapshot.log
+	while IFS= read -r line; do
 		make_table_snapshot $line
-	done < tables
-	echo "$date Finished making snapshot for all tables" >> $LOGS/makesnapshot.log
+	done <tables
+	echo "$currentDate Finished making snapshot for all tables" >>$LOGS/makesnapshot.log
+	exit 0
 }
 
 function list_hbase_tables_in_file() {
 	#create utils folder
 	mkdir -p $UTILS
-	
+
 	#get hbase tables
-	echo 'list' | hbase shell -n>>$UTILS/tables.txt
+	echo 'list' | hbase shell -n 2>$UTILS/tables.txt
 	status=$?
-	if [$status -ne 0]; then
-	  echo "$date ommand = list may have failed."
+	if [ $status -ne 0 ]; then
+		echo "$currentDate ommand = list may have failed."
+		exit $status
 	fi
-	
+
 	#remove TABLE from the first line of file
 	sed -i '1d' $UTILS/tables.txt
-	
+
+	sed -e '1,/seconds/ d' $UTILS/tables.txt
+
+	#remove last line containing number of row
+	sed '$d' $UTILS/tables.txt
+
 	tableList='$UTILS/tables.txt'
-	echo "$date Stored table list on $tableList" >> $LOGS/makesnapshot.log
+	echo "$currentDate Stored table list on $tableList" >>$LOGS/makesnapshot.log
 }
- 
-if [ -z $1 ] || [ $1 == '-h' ]
-then
+
+if [ -z $1 ] || [ $1 == '-h' ]; then
 	echo "Usage: $WORKING_DIR/$0 <table>"
-	echo "Usage: $WORKING_DIR/$0 <*>"
-	exit 1;
+	echo "Usage: $WORKING_DIR/$0 <all>"
+	echo "Usage: $WORKING_DIR/$0 multi </file/tables/list/tables.txt>"
+	exit 1
 fi
 
-
-if [[ $1 == '*' ]]
-then
+case $1 in
+'all')
 	#get tables list
 	list_hbase_tables_in_file
-	
 	#Start making snapshots process
 	make_all_table_snapshot $tableList
-elif [[ $1 == 'multi']]
-then
+	;;
+'multi')
 	#Multi table snapshot
 	#Expected file of table list
 	tableListPath=$2
 	make_all_table_snapshot $tableListPath
-else 
+	;;
+*)
 	#Make a single table snapshot
 	make_table_snapshot $1
-fi
-
-
+	exit 0
+	;;
+esac
