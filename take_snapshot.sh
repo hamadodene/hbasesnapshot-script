@@ -14,22 +14,11 @@
 # You are responsible for reviewing and testing any scripts you run thoroughly
 # before use in any non-testing environment.
 
-#Usage:
-#For single table Snapshot
-# bash take_snapshot.sh table
-#For all tableSnapshot
-#bash take_snapshot.sh all
-
-#For multi table snapshot
-#bash take_snapshot.sh multi /file/tables/list/tables.txt
-#table.txt contain list of tables. One table name per row
-
 export TS=$(date "+%s")
 export WORKING_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export LOGS=$WORKING_DIR/logs
 export currentDate=$(date '+%Y-%m-%d-%H-%M-%S')
 export UTILS=$WORKING_DIR/utils
-export HBASE_SHELL_OPTS="-Xms2048m -Xmx2048m"
 mkdir -p $LOGS
 
 function make_table_snapshot() {
@@ -45,19 +34,43 @@ function make_table_snapshot() {
 	fi
 }
 
-function make_all_table_snapshot() {
-	tables=$1
+function slow_make_all_table_snapshot() {
 	echo "$currentDate Start making snapshot for all tables" >>$LOGS/makesnapshot.log
 	while IFS= read -r line; do
 		make_table_snapshot $line
-	done <tables
+	done <$1
 	echo "$currentDate Finished making snapshot for all tables" >>$LOGS/makesnapshot.log
 	exit 0
+}
+
+function fast_make_all_table_snapshot() {
+	hbase shell -n $1 >>$LOGS/makesnapshot.log
+}
+
+function generate_all_tablesnapshot_command() {
+	if [ -f $UTILS/snapshot_commands.txt ]; then
+		echo "$currentDate  $UTILS/snapshot_commands.txt already exist, remove it"
+		rm -f $UTILS/snapshot_commands.txt
+		echo "$currentDate  $UTILS/snapshot_commands.txt is removed"
+	fi
+
+	while IFS= read -r line; do
+		echo "snapshot '$line', '$line-$TS'" >>$UTILS/snapshot_commands.txt
+	done <$1
+
+	echo "exit" >>$UTILS/snapshot_commands.txt
+	snapshotCommands=$UTILS/snapshot_commands.txt
 }
 
 function list_hbase_tables_in_file() {
 	#create utils folder
 	mkdir -p $UTILS
+
+	if [ -f $UTILS/tables.txt ]; then
+		echo "$currentDate $UTILS/tables.txt already exist, remove it"
+		rm -f $UTILS/tables.txt
+		echo "$currentDate $UTILS/tables.txt is removed"
+	fi
 
 	#get hbase tables
 	echo 'list' | hbase shell -n 2>$UTILS/tables.txt
@@ -81,23 +94,41 @@ function list_hbase_tables_in_file() {
 
 if [ -z $1 ] || [ $1 == '-h' ]; then
 	echo "Usage: $WORKING_DIR/$0 <table>"
-	echo "Usage: $WORKING_DIR/$0 <all>"
-	echo "Usage: $WORKING_DIR/$0 multi </file/tables/list/tables.txt>"
+	echo "Usage: $WORKING_DIR/$0 allfast"
+	echo "Usage: $WORKING_DIR/$0 allslow"
+	echo "Usage: $WORKING_DIR/$0 multifast /file/tables/list/tables.txt"
+	echo "Usage: $WORKING_DIR/$0 multislow /file/tables/list/tables.txt"
 	exit 1
 fi
 
 case $1 in
-'all')
+'allfast')
+	#get tables list
+	list_hbase_tables_in_file
+
+	#generate snapshot commands and save it in a file
+	generate_all_tablesnapshot_command $tableList
+
+	#Start making snapshots process
+	fast_make_all_table_snapshot $snapshotCommands
+
+	;;
+'allslow')
 	#get tables list
 	list_hbase_tables_in_file
 	#Start making snapshots process
 	make_all_table_snapshot $tableList
 	;;
-'multi')
+'multislow')
 	#Multi table snapshot
 	#Expected file of table list
-	tableListPath=$2
-	make_all_table_snapshot $tableListPath
+	make_all_table_snapshot $2
+	;;
+'multifast')
+	#Multi table snapshot
+	#Expected file of table list
+	generate_all_tablesnapshot_command $2
+	fast_make_all_table_snapshot $snapshotCommands
 	;;
 *)
 	#Make a single table snapshot
