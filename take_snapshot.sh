@@ -21,6 +21,33 @@ export currentDate=$(date '+%Y-%m-%d-%H-%M-%S')
 export UTILS=$WORKING_DIR/utils
 mkdir -p $LOGS
 
+function generate_snapshots_list_file() {
+	#create utils folder
+	mkdir -p $UTILS
+
+	if [ -f $UTILS/tableSnapshotsList.txt ]; then
+		echo "$currentDate $UTILS/tables.txt already exist, remove it"
+		rm -f $UTILS/tableSnapshotsList.txt
+		echo "$currentDate $UTILS/tables.txt is removed"
+	fi
+
+	#get hbase tables
+	echo 'list_snapshots' | hbase shell >>$UTILS/tableSnapshotsListTemp.txt
+	status=$?
+	if [ $status -ne 0 ]; then
+		echo "$currentDate Command = list_snapshots may have failed."
+		exit $status
+	fi
+
+	sed -i '/row/,$d' $UTILS/tableSnapshotsListTemp.txt
+	sed -i '1,/TABLE/d' $UTILS/tableSnapshotsListTemp.txt
+
+	awk '{print $1}' $UTILS/tableSnapshotsListTemp.txt>> $UTILS/tableSnapshotsList.txt
+
+	tableSnapshotsList="$UTILS/tableSnapshotsList.txt"
+	echo "$currentDate Stored snapshots list on $tableSnapshotsList" >>$LOGS/makesnapshot.log
+}
+
 function make_table_snapshot() {
 	tableName=$1
 	echo "$currentDate Create snapshot for table $tableName: $tableName-$currentDate" >>$LOGS/makesnapshot.log
@@ -44,7 +71,7 @@ function slow_make_all_table_snapshot() {
 }
 
 function fast_make_all_table_snapshot() {
-	hbase shell -n $1 >>$LOGS/makesnapshot.log
+	hbase shell $1 >>$LOGS/makesnapshot.log
 }
 
 function generate_all_tablesnapshot_command() {
@@ -73,22 +100,19 @@ function list_hbase_tables_in_file() {
 	fi
 
 	#get hbase tables
-	echo 'list' | hbase shell -n 2>$UTILS/tables.txt
+	echo 'list' | hbase shell >>$UTILS/tables.txt
 	status=$?
 	if [ $status -ne 0 ]; then
-		echo "$currentDate ommand = list may have failed."
+		echo "$currentDate Command = list may have failed."
 		exit $status
 	fi
 
 	#remove TABLE from the first line of file
-	sed -i '1d' $UTILS/tables.txt
+	sed -i '1,/TABLE/d' $UTILS/tables.txt
 
-	sed -e '1,/seconds/ d' $UTILS/tables.txt
+	sed -i '/row/,$d' $UTILS/tables.txt
 
-	#remove last line containing number of row
-	sed '$d' $UTILS/tables.txt
-
-	tableList='$UTILS/tables.txt'
+	tableList="$UTILS/tables.txt"
 	echo "$currentDate Stored table list on $tableList" >>$LOGS/makesnapshot.log
 }
 
@@ -130,6 +154,12 @@ case $1 in
 	generate_all_tablesnapshot_command $2
 	fast_make_all_table_snapshot $snapshotCommands
 	;;
+'generatesnapshotlist')
+	generate_snapshots_list_file
+	;;
+'generatetablelist')
+	list_hbase_tables_in_file
+	;;	
 *)
 	#Make a single table snapshot
 	make_table_snapshot $1
